@@ -1,22 +1,3 @@
-# ---
-# args: ["--no-quick-check"]
-# ---
-# # Fine-Tuning and Inference for Computer Vision with YOLO
-#
-# Example by [@Erik-Dunteman](https://github.com/erik-dunteman) and [@AnirudhRahul](https://github.com/AnirudhRahul/).
-
-# The popular "You Only Look Once" (YOLO) model line provides high-quality object detection in an economical package.
-# In this example, we use the [YOLOv10](https://docs.ultralytics.com/models/yolov10/) model, released on May 23, 2024.
-#
-# We will:
-# - Download two custom datasets from the [Roboflow](https://roboflow.com/) computer vision platform: a dataset of birds and a dataset of bees
-# - Fine-tune the model on those datasets, in parallel, using the [Ultralytics package](https://docs.ultralytics.com/)
-# - Run inference with the fine-tuned models on single images and on streaming frames
-
-# For commercial use, be sure to consult the [Ultralytics software license options](https://docs.ultralytics.com/#yolo-licenses-how-is-ultralytics-yolo-licensed),
-# which include AGPL-3.0.
-
-# ## Set up the environment
 
 import warnings
 from dataclasses import dataclass
@@ -24,9 +5,6 @@ from datetime import datetime
 from pathlib import Path
 
 import modal
-
-# Modal runs your code in the cloud inside containers. So to use it, we have to define the dependencies
-# of our code as part of the container's [image](https://modal.com/docs/guide/custom-container).
 
 image = (
     modal.Image.debian_slim(python_version="3.10")
@@ -41,28 +19,15 @@ image = (
     )
 )
 
-# We also create a persistent [Volume](https://modal.com/docs/guide/volumes) for storing datasets, trained weights, and inference outputs.
 
-volume = modal.Volume.from_name("animal_detections", create_if_missing=True)
+volume = modal.Volume.from_name("farm_animals", create_if_missing=True)
 volume_path = (  # the path to the volume from within the container
     Path("/root") / "data"
 )
 
-# We attach both of these to a Modal [App](https://modal.com/docs/guide/apps).
-app = modal.App("animal-detections", image=image, volumes={volume_path: volume})
+app = modal.App("farm-animals", image=image, volumes={volume_path: volume})
 
 
-# ## Download a dataset
-#
-# We'll be downloading our data from the [Roboflow](https://roboflow.com/) computer vision platform, so to follow along you'll need to:
-# - Create a free account on [Roboflow](https://app.roboflow.com/)
-# - [Generate a Private API key](https://app.roboflow.com/settings/api)
-# - Set up a Modal [Secret](https://modal.com/docs/guide/secrets) called `roboflow-api-key` in the Modal UI [here](https://modal.com/secrets),
-# setting the `ROBOFLOW_API_KEY` to the value of your API key.
-#
-# You're also free to bring your own dataset with a config in YOLOv10-compatible yaml format.
-#
-# We'll be training on the medium size model, but you're free to experiment with [other model sizes](https://docs.ultralytics.com/models/yolov10/#model-variants).
 
 
 @dataclass
@@ -103,7 +68,7 @@ def download_dataset(config: DatasetConfig):
 MINUTES = 60
 
 TRAIN_GPU_COUNT = 1
-TRAIN_GPU = modal.gpu.A100(count=TRAIN_GPU_COUNT)
+TRAIN_GPU = modal.gpu.H100(count=TRAIN_GPU_COUNT)
 TRAIN_CPU_COUNT = 4
 
 
@@ -131,16 +96,9 @@ def train(
     model.train(
         # dataset config
         data=data_path,
-        fraction=0.4
-        if not quick_check
-        else 0.04,  # fraction of dataset to use for training/validation
         # optimization config
         device=list(range(TRAIN_GPU_COUNT)),  # use the GPU(s)
-        epochs=8
-        if not quick_check
-        else 1,  # pass over entire dataset this many times
-        batch=0.95,  # automatic batch size to target fraction of GPU util
-        seed=117,  # set seed for reproducibility
+        epochs=100,
         # data processing config
         workers=max(
             TRAIN_CPU_COUNT // TRAIN_GPU_COUNT, 1
@@ -303,22 +261,24 @@ def main(quick_check: bool = True, inference_only: bool = False):
             volume_path / "runs" / model_id / "weights" / "best.pt"
         )
 
+        print(str(Path("dataset") / dataset.id / "test" / "images"))
+        print("=======================")
         # predict on a single image and save output to the volume
-        test_images = volume.listdir(
-            str(Path("dataset") / dataset.id / "farm_animal_detection" / "1" / "test" / "images")
-        )
+        # test_images = volume.listdir(
+        #     str(Path("dataset") / dataset.id / "test" / "images")
+        # )
         # run inference on the first 5 images
-        for ii, image in enumerate(test_images):
-            print(f"{model_id}: Single image prediction on image", image.path)
-            inference.predict.remote(
-                model_id=model_id,
-                image_path=f"{volume_path}/{image.path}",
-                display=(
-                    ii == 0  # display inference results only on first image
-                ),
-            )
-            if ii >= 4:
-                break
+        # for ii, image in enumerate(test_images):
+        #     print(f"{model_id}: Single image prediction on image", image.path)
+        #     inference.predict.remote(
+        #         model_id=model_id,
+        #         image_path=f"{volume_path}/{image.path}",
+        #         display=(
+        #             ii == 0  # display inference results only on first image
+        #         ),
+        #     )
+        #     if ii >= 4:
+        #         break
 
         # streaming inference on images from the test set
         print(
